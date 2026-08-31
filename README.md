@@ -1,204 +1,119 @@
 # AI-Powered Document Intelligence & RAG Platform
 
-A complete local, end-to-end RAG application for uploading PDF/DOCX/TXT files and asking grounded questions about them.
+An AI-powered application that lets you **upload documents and ask questions about them in normal language**.
 
-## What is included
+Instead of manually searching through a long document, you can upload it and simply ask:
 
-- React + Vite frontend
-- FastAPI backend
-- PostgreSQL + pgvector
-- Ollama for local embeddings and LLM generation
-- PDF, DOCX and TXT extraction
-- Page-aware chunking
-- Vector similarity retrieval
-- Source citations and similarity scores
-- Document-scoped chat
-- Document deletion
-- Health checks
-- Windows PowerShell setup/start scripts
-- Docker Compose for PostgreSQL
+> "What is the company's leave policy?"
 
-## Prerequisites (Windows)
+The application finds the relevant information from the document and uses an AI model to generate an answer based on that information.
 
-Install these once:
+## What does it do?
 
-1. Python 3.11 or 3.12
-2. Node.js 20+
-3. Docker Desktop
-4. Ollama
+* 📄 Upload PDF, DOCX, and TXT documents
+* 🔎 Search the content based on the meaning of your question
+* 🤖 Ask questions using natural language
+* 🧠 Generate answers using an AI model
+* 📚 Show the document sections used to generate the answer
+* 📷 Read scanned PDFs using OCR
+* 🗂️ Manage multiple uploaded documents
+* 🎯 Ask questions about specific documents
 
-Ollama must be running before you upload/chat. Install these models:
+## How does it work?
 
-```powershell
-ollama pull nomic-embed-text
-ollama pull llama3.2:3b
+The basic idea is:
+
+**Upload Document → Read Document → Break it into smaller sections → Store the sections → Ask a Question → Find the relevant sections → AI generates the answer**
+
+The project uses **RAG (Retrieval-Augmented Generation)** so the AI first looks for relevant information in the uploaded documents before answering.
+
+For example:
+
+**Document:** Company Handbook
+
+**Question:**
+
+> How many days of annual leave do employees receive?
+
+**System:**
+Finds the relevant section from the handbook.
+
+**AI:**
+
+> Employees receive 18 days of paid annual leave per year.
+
+The application also shows the source information used for the answer, making it easier to verify the response.
+
+## Technology Used
+
+**Frontend:** React, Vite
+
+**Backend:** Python, FastAPI
+
+**AI:** Ollama, Llama 3.2
+
+**Embeddings:** nomic-embed-text
+
+**Database:** PostgreSQL, pgvector
+
+**Document Processing:** PyMuPDF, python-docx
+
+**OCR:** Tesseract
+
+**Containerization:** Docker
+
+## Why I Built It
+
+I built this project to understand how a real-world **Retrieval-Augmented Generation (RAG)** application works from beginning to end.
+
+It helped me work with document processing, embeddings, vector search, LLMs, APIs, databases, OCR, and frontend-backend integration in one complete application.
+
+## Project Flow
+
+```text
+User uploads a document
+        ↓
+Document is processed
+        ↓
+Content is divided into smaller sections
+        ↓
+Sections are converted into embeddings
+        ↓
+Stored in PostgreSQL + pgvector
+        ↓
+User asks a question
+        ↓
+Relevant sections are retrieved
+        ↓
+AI generates an answer
+        ↓
+Answer + sources are displayed
 ```
 
-If `llama3.2:3b` is unavailable on your machine, change `OLLAMA_LLM_MODEL` in `backend/.env` to any chat-capable model you have pulled.
+## Run Locally
 
-## Fastest setup
+Make sure you have:
 
-Open the project folder in VS Code, then open PowerShell in the project root.
+* Python 3.11+
+* Node.js
+* Docker Desktop
+* Ollama
+* Tesseract OCR
 
-### First time only
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\setup.ps1
-```
-
-### Every time you want to run it
+Then run:
 
 ```powershell
 .\start.ps1
 ```
 
-The script starts PostgreSQL, checks Ollama, starts FastAPI, waits for the API, and starts the React dev server.
+Open:
 
-Open http://localhost:5173
+**http://localhost:5173**
 
-API docs: http://localhost:8000/docs
+---
 
-## Manual start
+### Project
 
-### 1. Database
+**AI-Powered Document Intelligence & RAG Platform**
 
-```powershell
-docker compose up -d db
-```
-
-### 2. Backend
-
-```powershell
-cd backend
-.\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload --port 8000
-```
-
-### 3. Frontend
-
-In another terminal:
-
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-## How the application works
-
-```text
-Upload document
-      |
-      v
-FastAPI validates file
-      |
-      v
-PDF/DOCX/TXT text extraction
-      |
-      v
-Page-aware chunking
-      |
-      v
-Ollama embedding model
-      |
-      v
-PostgreSQL + pgvector
-      |
-      v
-User question
-      |
-      v
-Question embedding
-      |
-      v
-Cosine similarity search
-      |
-      v
-Top relevant chunks
-      |
-      v
-Ollama LLM + grounded prompt
-      |
-      v
-Answer + source citations
-```
-
-## Supported files
-
-- `.pdf`
-- `.docx`
-- `.txt`
-
-Maximum upload size defaults to 20 MB. Change `MAX_UPLOAD_MB` in `backend/.env` if needed.
-
-## Troubleshooting
-
-### Docker is not running
-
-Start Docker Desktop and run:
-
-```powershell
-docker compose up -d db
-```
-
-### Ollama is not running
-
-Start Ollama, then check:
-
-```powershell
-ollama list
-```
-
-Pull models if necessary:
-
-```powershell
-ollama pull nomic-embed-text
-ollama pull llama3.2:3b
-```
-
-### Port already in use
-
-- Backend: 8000
-- Frontend: 5173
-- PostgreSQL: 5433 on the host, 5432 inside Docker
-
-Change `BACKEND_PORT` or `FRONTEND_PORT` in `start.ps1` if required.
-
-### Rebuild database from scratch
-
-```powershell
-docker compose down -v
-docker compose up -d db
-```
-
-This deletes all indexed documents.
-
-## Project structure
-
-```text
-ai-doc-rag/
-├── backend/
-│   ├── app/
-│   │   ├── config.py
-│   │   ├── db.py
-│   │   ├── ingest.py
-│   │   ├── main.py
-│   │   ├── models.py
-│   │   ├── ollama.py
-│   │   └── schemas.py
-│   ├── .env.example
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── main.jsx
-│   │   └── style.css
-│   ├── index.html
-│   └── package.json
-├── storage/
-├── docker-compose.yml
-├── setup.ps1
-├── start.ps1
-├── stop.ps1
-└── README.md
-```
+Built by **Yamini Sailaja Lakshmi**
