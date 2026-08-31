@@ -219,6 +219,7 @@ async def upload_document(
     db.refresh(document)
 
     try:
+
         # -------------------------------------------------
         # 5. Extract text
         # -------------------------------------------------
@@ -251,11 +252,8 @@ async def upload_document(
         for index, (page, text) in enumerate(
             pieces
         ):
-            vector = await embed(text)
 
-            # -------------------------------------------------
-            # Verify embedding dimension
-            # -------------------------------------------------
+            vector = await embed(text)
 
             if len(vector) != EMBEDDING_DIM:
                 raise ValueError(
@@ -285,19 +283,12 @@ async def upload_document(
         db.commit()
         db.refresh(document)
 
-        # -------------------------------------------------
-        # 9. Return document
-        # -------------------------------------------------
-
         return doc_out(
             db,
             document,
         )
 
     except Exception as exc:
-        # -------------------------------------------------
-        # Roll back failed transaction
-        # -------------------------------------------------
 
         db.rollback()
 
@@ -360,6 +351,178 @@ def delete_document(
 
 
 # =========================================================
+# FAST DOCUMENT SUMMARIZATION
+# =========================================================
+
+# Number of chunks used for a broad document overview.
+#
+# Keep this relatively small because the LLM is running
+# locally through Ollama.
+
+SUMMARY_CHUNK_LIMIT = 8
+
+
+def build_chunk_context(
+    chunks: list[tuple[Chunk, Document]],
+) -> str:
+    """
+    Convert chunks into structured LLM context.
+    """
+
+    parts = []
+
+    for chunk, document in chunks:
+
+        parts.append(
+            f"[Source {chunk.id}]\n"
+            f"Document: {document.filename}\n"
+            f"Page: {chunk.page or 'N/A'}\n"
+            f"Content:\n{chunk.text}"
+        )
+
+    return "\n\n".join(parts)
+
+
+def select_representative_chunks(
+    chunks: list[tuple[Chunk, Document]],
+    limit: int = SUMMARY_CHUNK_LIMIT,
+) -> list[tuple[Chunk, Document]]:
+    """
+    Select representative chunks from across the
+    document rather than sending every chunk to Ollama.
+
+    This makes broad document questions much faster.
+    """
+
+    if len(chunks) <= limit:
+        return chunks
+
+    step = len(chunks) / limit
+
+    selected = []
+
+    for index in range(limit):
+
+        position = min(
+            int(index * step),
+            len(chunks) - 1,
+        )
+
+        selected.append(
+            chunks[position]
+        )
+
+    return selected
+
+
+async def summarize_document(
+    chunks: list[tuple[Chunk, Document]],
+    question: str,
+) -> str:
+    """
+    Generate a fast overview of a document.
+
+    For small documents:
+        use all chunks.
+
+    For large documents:
+        use representative chunks from
+        different parts of the document.
+
+    Only ONE LLM call is made.
+    """
+
+    if not chunks:
+        return (
+            "I could not find enough information "
+            "in the provided documents."
+        )
+
+    # -----------------------------------------------------
+    # Select chunks
+    # -----------------------------------------------------
+
+    selected_chunks = (
+        select_representative_chunks(
+            chunks
+        )
+    )
+
+    # -----------------------------------------------------
+    # Build context
+    # -----------------------------------------------------
+
+    context = build_chunk_context(
+        selected_chunks
+    )
+
+    # -----------------------------------------------------
+    # Build prompt
+    # -----------------------------------------------------
+
+    prompt = f"""
+You are an AI document analysis assistant.
+
+The user wants to understand what the
+document contains.
+
+The supplied context contains either the
+complete document or representative sections
+from different parts of the document.
+
+Use ONLY the supplied document content.
+
+Answer the user's question directly.
+
+If the user asks what is inside the document,
+provide a useful overview containing:
+
+- what the document is about
+- its main purpose
+- major topics
+- important requirements
+- important features
+- important user roles
+- important technical details
+- other significant information
+
+IMPORTANT RULES:
+
+1. Do NOT use outside knowledge.
+
+2. Do NOT invent facts.
+
+3. Only state information supported by
+   the supplied document context.
+
+4. You may combine information from different
+   sections.
+
+5. Do not mention that only representative
+   sections were provided.
+
+6. Keep the response concise but informative.
+
+7. Cite relevant evidence using:
+   [Source X]
+
+DOCUMENT CONTEXT:
+
+{context}
+
+USER QUESTION:
+
+{question}
+
+ANSWER:
+"""
+
+    return await generate(
+        prompt
+    )
+
+
+# =========================================================
 # RAG CHAT
 # =========================================================
 
@@ -372,17 +535,155 @@ async def chat(
     db: Session = Depends(get_db),
 ):
     try:
-        # -------------------------------------------------
-        # 1. Embed the user's question
-        # -------------------------------------------------
+
+        # =====================================================
+        # 1. Detect broad document questions
+        # =====================================================
+
+        question_lower = (
+            request.question
+            .lower()
+            .strip()
+        )
+
+        broad_question_patterns = [
+            "what's inside",
+            "what is inside",
+            "what's in this document",
+            "what is in this document",
+            "what does this document contain",
+            "what is this document about",
+            "what's this document about",
+            "give me an introduction",
+            "give me a brief introduction",
+            "brief introduction",
+            "summarize this document",
+            "summarise this document",
+            "summary of this document",
+            "give me a summary",
+            "what are the main points",
+            "what are the main topics",
+            "overview of this document",
+            "give me an overview",
+            "tell me about this document",
+            "explain this document",
+            "describe this document",
+        ]
+
+        is_broad_question = any(
+            pattern in question_lower
+            for pattern in broad_question_patterns
+        )
+
+        # =====================================================
+        # 2. BROAD QUESTION
+        # =====================================================
+
+        if is_broad_question:
+
+            statement = (
+                select(
+                    Chunk,
+                    Document,
+                )
+                .join(
+                    Document,
+                    Chunk.document_id
+                    == Document.id,
+                )
+                .where(
+                    Document.status
+                    == "ready"
+                )
+            )
+
+            # -------------------------------------------------
+            # Respect document selection
+            # -------------------------------------------------
+
+            if request.document_ids:
+
+                statement = statement.where(
+                    Chunk.document_id.in_(
+                        request.document_ids
+                    )
+                )
+
+            # -------------------------------------------------
+            # Get chunks in document order
+            # -------------------------------------------------
+
+            rows = (
+                db.execute(
+                    statement.order_by(
+                        Chunk.document_id,
+                        Chunk.chunk_index,
+                    )
+                )
+                .all()
+            )
+
+            if not rows:
+
+                return ChatResponse(
+                    answer=(
+                        "I could not find any indexed "
+                        "document content to summarize."
+                    ),
+                    sources=[],
+                )
+
+            # -------------------------------------------------
+            # Fast document summary
+            # -------------------------------------------------
+
+            answer = await summarize_document(
+                rows,
+                request.question,
+            )
+
+            # -------------------------------------------------
+            # Return only the sources that were actually
+            # supplied to the summarization model.
+            # -------------------------------------------------
+
+            selected_chunks = (
+                select_representative_chunks(
+                    rows
+                )
+            )
+
+            sources = []
+
+            for chunk, document in selected_chunks:
+
+                sources.append(
+                    Source(
+                        document_id=document.id,
+                        filename=document.filename,
+                        chunk_id=chunk.id,
+                        page=chunk.page,
+                        score=1.0,
+                        excerpt=chunk.text[:400],
+                    )
+                )
+
+            return ChatResponse(
+                answer=answer,
+                sources=sources,
+            )
+
+        # =====================================================
+        # 3. SPECIFIC QUESTION — VECTOR RAG
+        # =====================================================
 
         question_vector = await embed(
             request.question
         )
 
-        # -------------------------------------------------
-        # 2. Calculate cosine distance
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # Calculate cosine distance
+        # -----------------------------------------------------
 
         distance = (
             Chunk.embedding.cosine_distance(
@@ -390,15 +691,13 @@ async def chat(
             )
         )
 
-        # -------------------------------------------------
-        # 3. Build vector search query
-        # -------------------------------------------------
-
         statement = (
             select(
                 Chunk,
                 Document,
-                distance.label("distance"),
+                distance.label(
+                    "distance"
+                ),
             )
             .join(
                 Document,
@@ -406,24 +705,26 @@ async def chat(
                 == Document.id,
             )
             .where(
-                Document.status == "ready"
+                Document.status
+                == "ready"
             )
         )
 
-        # -------------------------------------------------
-        # 4. Search only selected documents if specified
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # Restrict retrieval to selected documents
+        # -----------------------------------------------------
 
         if request.document_ids:
+
             statement = statement.where(
                 Chunk.document_id.in_(
                     request.document_ids
                 )
             )
 
-        # -------------------------------------------------
-        # 5. Retrieve most similar chunks
-        # -------------------------------------------------
+        # -----------------------------------------------------
+        # Retrieve most similar chunks
+        # -----------------------------------------------------
 
         rows = (
             db.execute(
@@ -434,11 +735,8 @@ async def chat(
             .all()
         )
 
-        # -------------------------------------------------
-        # 6. No chunks found
-        # -------------------------------------------------
-
         if not rows:
+
             return ChatResponse(
                 answer=(
                     "I could not find any indexed "
@@ -447,31 +745,31 @@ async def chat(
                 sources=[],
             )
 
-        # -------------------------------------------------
-        # 7. Build context and source metadata
-        # -------------------------------------------------
+        # =====================================================
+        # 4. BUILD RAG CONTEXT
+        # =====================================================
 
         context_parts = []
         sources = []
 
-        for chunk, document, dist in rows:
+        for (
+            chunk,
+            document,
+            distance_value,
+        ) in rows:
 
-            source_text = (
+            context_parts.append(
                 f"[Source {chunk.id}]\n"
                 f"Document: {document.filename}\n"
                 f"Page: {chunk.page or 'N/A'}\n"
                 f"Content:\n{chunk.text}"
             )
 
-            context_parts.append(
-                source_text
-            )
-
-            # Convert cosine distance to a simple
-            # similarity-like score.
             score = max(
                 0.0,
-                1.0 - float(dist),
+                1.0 - float(
+                    distance_value
+                ),
             )
 
             sources.append(
@@ -485,69 +783,68 @@ async def chat(
                 )
             )
 
-        # -------------------------------------------------
-        # 8. Combine retrieved chunks
-        # -------------------------------------------------
-
         context = "\n\n".join(
             context_parts
         )
 
-        # -------------------------------------------------
-        # 9. Create RAG prompt
-        # -------------------------------------------------
+        # =====================================================
+        # 5. GROUNDED QUESTION-ANSWERING PROMPT
+        # =====================================================
 
         prompt = f"""
-You are a document question-answering assistant.
+You are an AI assistant that answers questions
+about uploaded documents.
 
-Your job is to answer the user's question using ONLY
-the information contained in DOCUMENT CONTEXT.
+IMPORTANT RULES:
 
-Do NOT use your general knowledge.
+1. Use ONLY the supplied document context.
 
-Do NOT guess.
+2. Do NOT use outside knowledge.
 
-Do NOT invent information.
+3. Do NOT invent facts.
 
-If the answer is clearly present in the document context,
-answer the question directly.
+4. If the requested information exists in
+   the context, answer the question directly.
 
-If the answer is not present in the document context,
-respond exactly:
+5. You may combine information from multiple
+   retrieved sources.
 
-I could not find enough information in the provided documents.
+6. If the context genuinely does not contain
+   enough information, say:
 
-When you use information from a source, cite the source ID,
-for example:
+"I could not find enough information in the provided documents."
 
-[Source 14]
+7. Cite relevant evidence using [Source X].
 
-================ DOCUMENT CONTEXT ================
+8. Keep the answer clear and easy to understand.
+
+DOCUMENT CONTEXT:
 
 {context}
 
-================ END DOCUMENT CONTEXT ================
+END DOCUMENT CONTEXT.
 
-================ USER QUESTION ================
+USER QUESTION:
 
 {request.question}
 
-================ END USER QUESTION ================
+END USER QUESTION.
 
-Answer the user's question using only the document context.
+Now answer the question using only the
+document context.
 """
 
-        # -------------------------------------------------
-        # 10. Generate answer
-        # -------------------------------------------------
+        # =====================================================
+        # 6. GENERATE ANSWER
+        # =====================================================
 
         answer = await generate(
             prompt
         )
 
-        # -------------------------------------------------
-        # 11. Return answer and sources
-        # -------------------------------------------------
+        # =====================================================
+        # 7. RETURN ANSWER + SOURCES
+        # =====================================================
 
         return ChatResponse(
             answer=answer,
@@ -555,12 +852,14 @@ Answer the user's question using only the document context.
         )
 
     except OllamaError as exc:
+
         raise HTTPException(
             status_code=503,
             detail=str(exc),
         )
 
     except Exception as exc:
+
         raise HTTPException(
             status_code=500,
             detail=f"Chat failed: {exc}",
