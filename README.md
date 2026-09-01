@@ -1,31 +1,34 @@
 # AI-Powered Document Intelligence & RAG Platform
 
-An AI-powered application that lets you **upload documents and ask questions about them in normal language**.
+An end-to-end **Retrieval-Augmented Generation (RAG)** application that lets users upload documents and ask questions about them in natural language.
 
-Instead of manually searching through a long document, you can upload it and simply ask:
+Instead of manually searching through a long document, users can upload a file and ask questions such as:
 
 > "What is the company's leave policy?"
 
-The application finds the relevant information from the document and uses an AI model to generate an answer based on that information.
+The system retrieves relevant content from the document and uses an AI model to generate a grounded answer with source references.
+
+## Preview
+
+![AI Document Intelligence](screenshot.png)
 
 ## What does it do?
 
-* 📄 Upload PDF, DOCX, and TXT documents
-* 🔎 Search the content based on the meaning of your question
-* 🤖 Ask questions using natural language
-* 🧠 Generate answers using an AI model
-* 📚 Show the document sections used to generate the answer
-* 📷 Read scanned PDFs using OCR
-* 🗂️ Manage multiple uploaded documents
-* 🎯 Ask questions about specific documents
+- 📄 Upload PDF, DOCX, and TXT documents
+- 🔎 Semantic search based on the meaning of the question
+- 🤖 Ask questions using natural language
+- 🧠 Generate AI-powered answers using retrieved document content
+- 📚 Display the document sections used to generate the answer
+- 📷 Read scanned PDFs using OCR
+- 🗂️ Manage multiple uploaded documents
+- 🎯 Ask questions about specific documents
+- 📝 Generate document overviews and summaries
 
 ## How does it work?
 
-The basic idea is:
+The application follows a Retrieval-Augmented Generation (RAG) pipeline:
 
-**Upload Document → Read Document → Break it into smaller sections → Store the sections → Ask a Question → Find the relevant sections → AI generates the answer**
-
-The project uses **RAG (Retrieval-Augmented Generation)** so the AI first looks for relevant information in the uploaded documents before answering.
+**Upload Document → Extract Text → Chunk Content → Generate Embeddings → Store in Vector Database → Retrieve Relevant Chunks → Generate Grounded Answer**
 
 For example:
 
@@ -36,81 +39,43 @@ For example:
 > How many days of annual leave do employees receive?
 
 **System:**
-Finds the relevant section from the handbook.
+
+Retrieves the relevant section from the handbook.
 
 **AI:**
 
 > Employees receive 18 days of paid annual leave per year.
 
-The application also shows the source information used for the answer, making it easier to verify the response.
+The application also displays the source information used to generate the answer, making the response easier to verify.
 
-## Technology Used
-
-**Frontend:** React, Vite
-
-**Backend:** Python, FastAPI
-
-**AI:** Ollama, Llama 3.2
-
-**Embeddings:** nomic-embed-text
-
-**Database:** PostgreSQL, pgvector
-
-**Document Processing:** PyMuPDF, python-docx
-
-**OCR:** Tesseract
-
-**Containerization:** Docker
-
-## Why I Built It
-
-I built this project to understand how a real-world **Retrieval-Augmented Generation (RAG)** application works from beginning to end.
-
-It helped me work with document processing, embeddings, vector search, LLMs, APIs, databases, OCR, and frontend-backend integration in one complete application.
-
-## Project Flow
+## RAG Architecture
 
 ```text
-User uploads a document
+User uploads document
         ↓
-Document is processed
+PDF / DOCX / TXT extraction
         ↓
-Content is divided into smaller sections
+OCR for scanned PDFs
         ↓
-Sections are converted into embeddings
+Text chunking
         ↓
-Stored in PostgreSQL + pgvector
+Embedding generation
+        ↓
+PostgreSQL + pgvector
         ↓
 User asks a question
         ↓
-Relevant sections are retrieved
+Question embedding
         ↓
-AI generates an answer
+Semantic similarity search
         ↓
-Answer + sources are displayed
-```
-
-## Run Locally
-
-Make sure you have:
-
-* Python 3.11+
-* Node.js
-* Docker Desktop
-* Ollama
-* Tesseract OCR
-
-Then run:
-
-```powershell
-.\start.ps1
-```
-
-Open:
-
-**http://localhost:5173**
-
----
+Relevant document chunks
+        ↓
+Ollama LLM
+        ↓
+Grounded answer
+        ↓
+Answer + source citations
 
 ### Project
 
